@@ -70,7 +70,7 @@ func useVCL(conn *net.Conn, vclName string) error {
 	return handleCmd(conn, cmd)
 }
 
-func (vManager *VarnishManager) Reload() error {
+func (vManager *VarnishManager) reloadVCL() error {
 	vclName := generateVCLName()
 
 	conn, err := openConnection()

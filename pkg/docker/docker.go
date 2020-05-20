@@ -2,6 +2,8 @@ package docker
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
@@ -14,7 +16,20 @@ type DockerManager struct {
 	Containers map[string]*DockerData
 }
 
-func (dManager *DockerManager) CheckContainerData() bool {
+func (dManager *DockerManager) watch(changedChan chan bool) {
+	for {
+		select {
+		case <-time.After(10 * time.Second):
+			fmt.Printf("Data check\n")
+			if dManager.checkContainerData() {
+				fmt.Printf("Data changed\n")
+				changedChan <- true
+			}
+		}
+	}
+}
+
+func (dManager *DockerManager) checkContainerData() bool {
 	newData, err := buildContainers()
 	if err != nil {
 		// Mask error for now
@@ -77,7 +92,7 @@ func buildContainers() (map[string]*DockerData, error) {
 	return dData, nil
 }
 
-func New() (*DockerManager, error) {
+func New(dataChangedChannel chan bool) (*DockerManager, error) {
 	initContext()
 	dData, err := buildContainers()
 	if err != nil {
@@ -87,5 +102,7 @@ func New() (*DockerManager, error) {
 	dManager := &DockerManager{
 		Containers: dData,
 	}
+	go dManager.watch(dataChangedChannel)
+
 	return dManager, nil
 }

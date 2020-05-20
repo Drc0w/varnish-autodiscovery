@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"syscall"
 	"text/template"
+	"time"
 
 	"github.com/Drc0w/varnish-autodiscovery/pkg/docker"
 )
@@ -14,9 +15,8 @@ import (
 // Default template path
 const DefaultTemplatePath = "./default.tpl"
 
+// Default Varnish configuration path
 const DefaultVLCPath = "/etc/varnish/default.vcl"
-
-//const DefaultVLCPath = "/dev/stdout"
 
 type VarnishOpts struct {
 	TemplatePath string
@@ -24,7 +24,7 @@ type VarnishOpts struct {
 	ListenPort   string
 }
 
-type VarnishWatcher struct {
+type VarnishWatchInfo struct {
 	TemplateStat os.FileInfo
 	Template     *template.Template
 }
@@ -33,11 +33,22 @@ type VarnishManager struct {
 	Opts    VarnishOpts
 	command *exec.Cmd
 	process *os.Process
-	watcher VarnishWatcher
+	watcher VarnishWatchInfo
+}
+
+func (vManager *VarnishManager) watch(changedChan chan bool) {
+	for {
+		select {
+		case <-time.After(10 * time.Second):
+			if vManager.checkTemplateChanged() {
+				changedChan <- true
+			}
+		}
+	}
 }
 
 func (vManager *VarnishManager) RenderVCL(dData map[string]*docker.DockerData) error {
-	vManager.InitWatcher()
+	vManager.initWatchInfo()
 	f, err := os.OpenFile(vManager.Opts.VCLPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		panic(err)
@@ -72,7 +83,7 @@ func (vManager *VarnishManager) Run() {
 	}()
 }
 
-func (vManager *VarnishManager) CheckTemplateChanged() bool {
+func (vManager *VarnishManager) checkTemplateChanged() bool {
 	stat, err := os.Stat(vManager.Opts.TemplatePath)
 	if err != nil {
 		return false
@@ -84,7 +95,17 @@ func (vManager *VarnishManager) Stop() {
 	vManager.command.Process.Signal(syscall.SIGINT)
 }
 
-func (v *VarnishManager) InitWatcher() {
+func (vManager *VarnishManager) Reload(dManager *docker.DockerManager) error {
+	if err := vManager.RenderVCL(dManager.Containers); err != nil {
+		return err
+	}
+	if err := vManager.reloadVCL(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (v *VarnishManager) initWatchInfo() {
 	templatePath := v.Opts.TemplatePath
 	v.watcher.Template = template.Must(template.ParseFiles(templatePath))
 	v.watcher.TemplateStat, _ = os.Stat(templatePath)
@@ -95,9 +116,12 @@ func (v *VarnishOpts) SetDefaults() {
 	v.VCLPath = DefaultVLCPath
 }
 
-func New() *VarnishManager {
+func New(varnishConfChanged chan bool) *VarnishManager {
 	vManager := VarnishManager{}
 	vManager.Opts.SetDefaults()
 	vManager.initCommand()
+
+	go vManager.watch(varnishConfChanged)
+
 	return &vManager
 }
