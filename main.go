@@ -8,35 +8,20 @@ import (
 	"github.com/Drc0w/varnish-autodiscovery/pkg/varnish"
 )
 
-func CheckContainerData(oldData map[string]*docker.DockerData, dData map[string]*docker.DockerData) bool {
-	if len(oldData) != len(dData) {
-		return true
-	}
-	changed := false
-	for id := range oldData {
-		changed = !oldData[id].Equals(dData[id])
-		if changed {
-			return true
-		}
-	}
-	return changed
-}
-
 func main() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
-	docker.Init()
-	dData, err := docker.LoadContainers()
-	conf := make(chan map[string]*docker.DockerData)
-
+	dManager, err := docker.New()
 	if err != nil {
 		fmt.Printf(err.Error())
 		panic(err)
 	}
 
+	conf := make(chan map[string]*docker.DockerData)
+
 	vManager := varnish.New()
-	err = vManager.RenderVCL(dData)
+	err = vManager.RenderVCL(dManager.Containers)
 	if err != nil {
 		panic(err)
 	}
@@ -44,21 +29,14 @@ func main() {
 	vManager.Run()
 
 	go func() {
-		oldData := dData
 		for {
-			dData, err := (docker.LoadContainers())
-			if err != nil {
-				fmt.Printf(err.Error())
-				panic(err)
-			}
-			if CheckContainerData(oldData, dData) {
+			if dManager.CheckContainerData() {
 				fmt.Printf("Data changed\n")
-				conf <- dData
+				conf <- dManager.Containers
 			} else if vManager.CheckTemplateChanged() {
 				fmt.Printf("Configuration file changed\n")
-				conf <- dData
+				conf <- dManager.Containers
 			}
-			oldData = dData
 			time.Sleep(10 * time.Second)
 		}
 	}()
