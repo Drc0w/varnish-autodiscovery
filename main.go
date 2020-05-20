@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"time"
 
-	vdocker "./pkg/docker"
-	"./pkg/varnish"
+	"github.com/Drc0w/varnish-autodiscovery/pkg/docker"
+	"github.com/Drc0w/varnish-autodiscovery/pkg/varnish"
 )
 
-func CheckContainerData(oldData map[string]*vdocker.DockerData, dData map[string]*vdocker.DockerData) bool {
+func CheckContainerData(oldData map[string]*docker.DockerData, dData map[string]*docker.DockerData) bool {
 	if len(oldData) != len(dData) {
 		return true
 	}
@@ -26,9 +26,9 @@ func main() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
-	vdocker.Init()
-	dData, err := vdocker.LoadContainers()
-	conf := make(chan map[string]*vdocker.DockerData)
+	docker.Init()
+	dData, err := docker.LoadContainers()
+	conf := make(chan map[string]*docker.DockerData)
 
 	if err != nil {
 		fmt.Printf(err.Error())
@@ -46,7 +46,7 @@ func main() {
 	go func() {
 		oldData := dData
 		for {
-			dData, err := (vdocker.LoadContainers())
+			dData, err := (docker.LoadContainers())
 			if err != nil {
 				fmt.Printf(err.Error())
 				panic(err)

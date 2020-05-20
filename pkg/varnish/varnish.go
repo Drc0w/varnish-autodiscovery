@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"text/template"
 
-	"../docker/"
+	"github.com/Drc0w/varnish-autodiscovery/pkg/docker"
 )
 
 // Default template path
@@ -36,7 +36,7 @@ type VarnishManager struct {
 	watcher VarnishWatcher
 }
 
-func (vManager *VarnishManager) RenderVCL(dData map[string]*vdocker.DockerData) error {
+func (vManager *VarnishManager) RenderVCL(dData map[string]*docker.DockerData) error {
 	vManager.InitWatcher()
 	f, err := os.OpenFile(vManager.Opts.VCLPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {

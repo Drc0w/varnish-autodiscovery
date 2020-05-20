@@ -1,4 +1,4 @@
-package vdocker
+package docker
 
 import (
 	"context"
