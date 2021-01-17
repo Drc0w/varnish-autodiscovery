@@ -48,3 +48,6 @@ $RECYCLE.BIN/
 
 # Compiled objects
 varnish-autodiscovery
+
+# Go files
+vendor/
