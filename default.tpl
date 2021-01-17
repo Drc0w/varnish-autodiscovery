@@ -5,7 +5,7 @@ import directors;
 {{range $key, $value := . -}}
 {{if $value -}}
 backend backend_{{$value.ShortID}} {
-    .host = "{{$value.GetIPAddressFromNetwork}}";
+    .host = "{{$value.GetIPAddress}}";
     .port = "80";
 }
 

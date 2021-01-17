@@ -26,7 +26,7 @@ func main() {
 	}
 
 	vManager := varnish.New(varnishChannel)
-	err = vManager.RenderVCL(dManager.Containers)
+	err = vManager.RenderVCL(dManager.Endpoints)
 	if err != nil {
 		panic(err)
 	}

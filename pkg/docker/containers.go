@@ -2,31 +2,19 @@ package docker
 
 import (
 	"errors"
+
+	"github.com/docker/docker/api/types"
 )
 
-type DockerData struct {
-	ShortID  string
-	ID       string
-	Name     string
-	Networks map[string]*networkData
-	Labels   map[string]string
-}
-
-type networkData struct {
-	ID   string
-	Name string
-	Addr string
-}
-
-func (dData *DockerData) ShouldAddBackend() bool {
+func (dData *DockerData) shouldAddContainerBackend() bool {
 	if dData == nil {
 		return false
 	}
-	net, err := dData.GetIPAddressFromNetwork()
+	net, err := dData.getContainerIPAddress()
 	return err == nil && len(net) > 0
 }
 
-func (dData *DockerData) GetIPAddressFromNetwork() (string, error) {
+func (dData *DockerData) getContainerIPAddress() (string, error) {
 	networkName := dData.Labels["network"]
 	if len(networkName) != 0 {
 		return dData.Networks[networkName].Addr, nil
@@ -45,6 +33,7 @@ func loadContainerData(containerID string) (*DockerData, error) {
 		ID:      containerID,
 		Name:    rawData.Name,
 		Labels:  rawData.Config.Labels,
+		dType:   CONTAINER,
 	}
 
 	if rawData.NetworkSettings != nil && rawData.NetworkSettings.Networks != nil {
@@ -59,38 +48,85 @@ func loadContainerData(containerID string) (*DockerData, error) {
 	} else {
 		return nil, errors.New("No network settings found.")
 	}
-	if _, err := dData.GetIPAddressFromNetwork(); err != nil {
+	if _, err := dData.getContainerIPAddress(); err != nil {
 		return nil, err
 	}
 	return dData, nil
 }
 
-func (dData *DockerData) Equals(rightData *DockerData) bool {
-	if dData == nil || rightData == nil {
-		return dData == rightData
+func (dData *DockerData) containerEquals(cmp *DockerData) bool {
+	if dData == nil || cmp == nil {
+		return dData == cmp
 	}
 
-	labelChanged := dData.Labels["network"] != rightData.Labels["network"]
+	if dData.ID != cmp.ID || dData.Name != cmp.Name || dData.Labels["network"] != cmp.Labels["network"] {
+		return false
+	}
 
 	netChanged := false
 	for net := range dData.Networks {
 		if netChanged {
 			break
 		}
-		netChanged = rightData.Networks[net] == nil ||
-			dData.Networks[net].ID != rightData.Networks[net].ID ||
-			dData.Networks[net].Name != rightData.Networks[net].Name ||
-			dData.Networks[net].Addr != rightData.Networks[net].Addr
+		netChanged = cmp.Networks[net] == nil ||
+			dData.Networks[net].ID != cmp.Networks[net].ID ||
+			dData.Networks[net].Name != cmp.Networks[net].Name ||
+			dData.Networks[net].Addr != cmp.Networks[net].Addr
 	}
-	for net := range rightData.Networks {
+	for net := range cmp.Networks {
 		if netChanged {
 			break
 		}
 		netChanged = dData.Networks[net] == nil ||
-			rightData.Networks[net].ID != dData.Networks[net].ID ||
-			rightData.Networks[net].Name != dData.Networks[net].Name ||
-			rightData.Networks[net].Addr != dData.Networks[net].Addr
+			cmp.Networks[net].ID != dData.Networks[net].ID ||
+			cmp.Networks[net].Name != dData.Networks[net].Name ||
+			cmp.Networks[net].Addr != dData.Networks[net].Addr
 	}
 
-	return dData.ID == rightData.ID && dData.Name == rightData.Name && !netChanged && !labelChanged
+	return !netChanged
+}
+
+func (dManager *DockerManager) checkContainerData() bool {
+	newData := make(map[string]*DockerData)
+	err := buildContainers(newData)
+	if err != nil {
+		// Mask error for now
+		return false
+	}
+
+	if len(dManager.Endpoints) != len(newData) {
+		dManager.Endpoints = newData
+		return true
+	}
+
+	changed := false
+	for id := range dManager.Endpoints {
+		changed = !dManager.Endpoints[id].containerEquals(newData[id])
+		if changed {
+			changed = true
+			break
+		}
+	}
+
+	dManager.Endpoints = newData
+
+	return changed
+}
+
+func buildContainers(dData map[string]*DockerData) error {
+	containers, err := dClient.ContainerList(dContext, types.ContainerListOptions{})
+	if err != nil {
+		return err
+	}
+
+	for _, container := range containers {
+		containerData, err := loadContainerData(container.ID)
+		if err != nil {
+			continue
+		}
+		if containerData.shouldAddContainerBackend() {
+			dData[container.ID] = containerData
+		}
+	}
+	return nil
 }
