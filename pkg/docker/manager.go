@@ -34,8 +34,13 @@ func (dManager *DockerManager) watch(changedChan chan bool) {
 		select {
 		case <-time.After(10 * time.Second):
 			fmt.Printf("Data check\n")
-			if dManager.checkContainerData() {
+			newData, err := build()
+			if err != nil {
+				panic(err)
+			}
+			if compareDockerData(dManager.Endpoints, newData) {
 				fmt.Printf("Data changed\n")
+				dManager.Endpoints = newData
 				changedChan <- true
 			}
 		}

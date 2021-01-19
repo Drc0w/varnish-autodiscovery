@@ -2,36 +2,64 @@ package docker
 
 import (
 	"errors"
+	"net"
+
+	"github.com/docker/docker/api/types"
+	swarm "github.com/docker/docker/api/types/swarm"
 )
 
-func (dData *DockerData) shouldAddServiceBackend() bool {
-	if dData == nil {
-		return false
+// This networks list must be based on IDs and not on names
+func loadServiceData(service swarm.Service, networks map[string]*networkData) (*DockerData, error) {
+	if service.Endpoint.Spec.Mode != "vip" {
+		return nil, errors.New("Not a service with VIP enabled")
 	}
-	net, err := dData.getServiceIPAddress()
-	return err == nil && len(net) > 0
-}
 
-func (dData *DockerData) getServiceIPAddress() (string, error) {
-	networkName := dData.Labels["network"]
-	if len(networkName) != 0 {
-		return dData.Networks[networkName].Addr, nil
+	dData := &DockerData{
+		ShortID: service.ID[:10],
+		ID:      service.ID,
+		Name:    service.Spec.Name,
+		Labels:  service.Spec.Labels,
+		dType:   SERVICE,
 	}
-	return "", errors.New("No network labels found.")
+
+	for i := range service.Spec.TaskTemplate.Networks {
+		targetID := service.Spec.TaskTemplate.Networks[i].Target
+		targetAddr := ""
+		for vip := range service.Endpoint.VirtualIPs {
+			if service.Endpoint.VirtualIPs[vip].NetworkID == targetID {
+				targetAddr = service.Endpoint.VirtualIPs[vip].Addr
+				break
+			}
+		}
+		if len(targetAddr) == 0 {
+			continue
+		}
+		ip, _, _ := net.ParseCIDR(targetAddr)
+		dData.Networks = make(map[string]*networkData)
+		dData.Networks[networks[targetID].Name] = &networkData{
+			ID:   targetID,
+			Name: networks[targetID].Name,
+			Addr: ip.String(),
+		}
+	}
+
+	return dData, nil
 }
 
-func loadServiceData(containerID string) (*DockerData, error) {
-	return nil, nil
-}
+func buildServices(dData map[string]*DockerData, networks map[string]*networkData) error {
+	services, err := dClient.ServiceList(dContext, types.ServiceListOptions{})
+	if err != nil {
+		return err
+	}
 
-func (dData *DockerData) serviceEquals(cmp *DockerData) bool {
-	return true
-}
-
-func (dManager *DockerManager) checkServiceData() bool {
-	return true
-}
-
-func buildServices(map[string]*DockerData) error {
+	for _, service := range services {
+		serviceData, err := loadServiceData(service, networks)
+		if err != nil {
+			continue
+		}
+		if serviceData.shouldAddBackend() {
+			dData[service.ID] = serviceData
+		}
+	}
 	return nil
 }
