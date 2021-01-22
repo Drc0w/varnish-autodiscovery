@@ -91,9 +91,9 @@ func build() (map[string]*DockerData, error) {
 	return dData, nil
 }
 
-func compareDockerData(oldData map[string]*DockerData, newData map[string]*DockerData) bool {
+func changedDockerData(oldData map[string]*DockerData, newData map[string]*DockerData) bool {
 	if len(oldData) != len(newData) {
-		return false
+		return true
 	}
 
 	changed := false
