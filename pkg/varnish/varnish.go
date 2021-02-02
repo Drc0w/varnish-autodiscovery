@@ -96,7 +96,7 @@ func (vManager *VarnishManager) Stop() {
 }
 
 func (vManager *VarnishManager) Reload(dManager *docker.DockerManager) error {
-	if err := vManager.RenderVCL(dManager.Containers); err != nil {
+	if err := vManager.RenderVCL(dManager.Endpoints); err != nil {
 		return err
 	}
 	if err := vManager.reloadVCL(); err != nil {

@@ -1,108 +1,109 @@
 package docker
 
 import (
-	"context"
-	"fmt"
-	"time"
+	"errors"
 
 	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/client"
 )
 
-var dContext context.Context
-var dClient *client.Client
-
-type DockerManager struct {
-	Containers map[string]*DockerData
-}
-
-func (dManager *DockerManager) watch(changedChan chan bool) {
-	for {
-		select {
-		case <-time.After(10 * time.Second):
-			fmt.Printf("Data check\n")
-			if dManager.checkContainerData() {
-				fmt.Printf("Data changed\n")
-				changedChan <- true
-			}
-		}
+func (dData *DockerData) equals(cmp *DockerData) bool {
+	if dData == nil || cmp == nil {
+		return dData == cmp
 	}
-}
 
-func (dManager *DockerManager) checkContainerData() bool {
-	newData, err := buildContainers()
-	if err != nil {
-		// Mask error for now
+	if dData.ID != cmp.ID || dData.Name != cmp.Name || dData.Labels["network"] != cmp.Labels["network"] || dData.dType != cmp.dType {
 		return false
 	}
 
-	if len(dManager.Containers) != len(newData) {
-		dManager.Containers = newData
+	netChanged := false
+	for net := range dData.Networks {
+		if netChanged {
+			break
+		}
+		netChanged = cmp.Networks[net] == nil ||
+			dData.Networks[net].ID != cmp.Networks[net].ID ||
+			dData.Networks[net].Name != cmp.Networks[net].Name ||
+			dData.Networks[net].Addr != cmp.Networks[net].Addr
+	}
+	for net := range cmp.Networks {
+		if netChanged {
+			break
+		}
+		netChanged = dData.Networks[net] == nil ||
+			cmp.Networks[net].ID != dData.Networks[net].ID ||
+			cmp.Networks[net].Name != dData.Networks[net].Name ||
+			cmp.Networks[net].Addr != dData.Networks[net].Addr
+	}
+
+	return !netChanged
+}
+
+func (dData *DockerData) shouldAddBackend() bool {
+	if dData == nil {
+		return false
+	}
+	net, err := dData.GetIPAddress()
+	return err == nil && len(net) > 0
+}
+
+func (dData *DockerData) GetIPAddress() (string, error) {
+	networkName := dData.Labels["network"]
+	if len(networkName) == 0 {
+		return "", errors.New("No network labels found.")
+	}
+	if dData.Networks[networkName] == nil {
+		return "", errors.New("No network found for container.")
+	}
+	return dData.Networks[networkName].Addr, nil
+}
+
+func getNetworkList(netData map[string]*networkData) error {
+	networks, err := dClient.NetworkList(dContext, types.NetworkListOptions{})
+	if err != nil {
+		return err
+	}
+
+	for _, network := range networks {
+		netData[network.ID] = &networkData{
+			Name: network.Name,
+			ID:   network.ID,
+			Addr: "",
+		}
+	}
+	return nil
+}
+
+func build() (map[string]*DockerData, error) {
+	networkList := make(map[string]*networkData)
+	if err := getNetworkList(networkList); err != nil {
+		return nil, err
+	}
+
+	dData := make(map[string]*DockerData)
+	if err := buildContainers(dData); err != nil {
+		return nil, err
+	}
+
+	if err := buildServices(dData, networkList); err != nil {
+		return nil, err
+	}
+
+	return dData, nil
+}
+
+func changedDockerData(oldData map[string]*DockerData, newData map[string]*DockerData) bool {
+	if len(oldData) != len(newData) {
 		return true
 	}
 
 	changed := false
-	for id := range dManager.Containers {
-		changed = !dManager.Containers[id].Equals(newData[id])
+	for id := range oldData {
+		changed = !oldData[id].equals(newData[id])
 		if changed {
 			changed = true
 			break
 		}
 	}
 
-	dManager.Containers = newData
-
 	return changed
-}
-
-func loadContext() {
-	dContext = context.Background()
-}
-
-func loadClient() {
-	var err error
-	dClient, err = client.NewClientWithOpts(client.FromEnv)
-	if err != nil {
-		panic(err)
-	}
-	dClient.NegotiateAPIVersion(dContext)
-}
-
-func initContext() {
-	loadContext()
-	loadClient()
-}
-
-func buildContainers() (map[string]*DockerData, error) {
-	containers, err := dClient.ContainerList(dContext, types.ContainerListOptions{})
-	if err != nil {
-		return nil, err
-	}
-
-	dData := make(map[string]*DockerData)
-	for _, container := range containers {
-		containerData, err := loadContainerData(container.ID)
-		if err != nil {
-			continue
-		}
-		if containerData.ShouldAddBackend() {
-			dData[container.ID] = containerData
-		}
-	}
-	return dData, nil
-}
-
-func New(dataChangedChannel chan bool) (*DockerManager, error) {
-	initContext()
-	dData, err := buildContainers()
-	if err != nil {
-		return nil, err
-	}
-
-	dManager := &DockerManager{
-		Containers: dData,
-	}
-	go dManager.watch(dataChangedChannel)
-
-	return dManager, nil
 }

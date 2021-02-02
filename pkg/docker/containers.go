@@ -2,37 +2,9 @@ package docker
 
 import (
 	"errors"
+
+	"github.com/docker/docker/api/types"
 )
-
-type DockerData struct {
-	ShortID  string
-	ID       string
-	Name     string
-	Networks map[string]*networkData
-	Labels   map[string]string
-}
-
-type networkData struct {
-	ID   string
-	Name string
-	Addr string
-}
-
-func (dData *DockerData) ShouldAddBackend() bool {
-	if dData == nil {
-		return false
-	}
-	net, err := dData.GetIPAddressFromNetwork()
-	return err == nil && len(net) > 0
-}
-
-func (dData *DockerData) GetIPAddressFromNetwork() (string, error) {
-	networkName := dData.Labels["network"]
-	if len(networkName) != 0 {
-		return dData.Networks[networkName].Addr, nil
-	}
-	return "", errors.New("No network labels found.")
-}
 
 func loadContainerData(containerID string) (*DockerData, error) {
 	rawData, err := dClient.ContainerInspect(dContext, containerID)
@@ -45,6 +17,7 @@ func loadContainerData(containerID string) (*DockerData, error) {
 		ID:      containerID,
 		Name:    rawData.Name,
 		Labels:  rawData.Config.Labels,
+		dType:   CONTAINER,
 	}
 
 	if rawData.NetworkSettings != nil && rawData.NetworkSettings.Networks != nil {
@@ -59,38 +32,26 @@ func loadContainerData(containerID string) (*DockerData, error) {
 	} else {
 		return nil, errors.New("No network settings found.")
 	}
-	if _, err := dData.GetIPAddressFromNetwork(); err != nil {
+	if _, err := dData.GetIPAddress(); err != nil {
 		return nil, err
 	}
 	return dData, nil
 }
 
-func (dData *DockerData) Equals(rightData *DockerData) bool {
-	if dData == nil || rightData == nil {
-		return dData == rightData
+func buildContainers(dData map[string]*DockerData) error {
+	containers, err := dClient.ContainerList(dContext, types.ContainerListOptions{})
+	if err != nil {
+		return err
 	}
 
-	labelChanged := dData.Labels["network"] != rightData.Labels["network"]
-
-	netChanged := false
-	for net := range dData.Networks {
-		if netChanged {
-			break
+	for _, container := range containers {
+		containerData, err := loadContainerData(container.ID)
+		if err != nil {
+			continue
 		}
-		netChanged = rightData.Networks[net] == nil ||
-			dData.Networks[net].ID != rightData.Networks[net].ID ||
-			dData.Networks[net].Name != rightData.Networks[net].Name ||
-			dData.Networks[net].Addr != rightData.Networks[net].Addr
-	}
-	for net := range rightData.Networks {
-		if netChanged {
-			break
+		if containerData.shouldAddBackend() {
+			dData[container.ID] = containerData
 		}
-		netChanged = dData.Networks[net] == nil ||
-			rightData.Networks[net].ID != dData.Networks[net].ID ||
-			rightData.Networks[net].Name != dData.Networks[net].Name ||
-			rightData.Networks[net].Addr != dData.Networks[net].Addr
 	}
-
-	return dData.ID == rightData.ID && dData.Name == rightData.Name && !netChanged && !labelChanged
+	return nil
 }
